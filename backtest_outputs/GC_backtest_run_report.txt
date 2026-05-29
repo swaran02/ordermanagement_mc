@@ -1,0 +1,15 @@
+Gold Backtest Run Report
+==========================
+
+Recommendation sanity checks
+- Missing critical values: see GC_recommendation_missing_summary.csv
+- Bad buy rows: 0
+- Bad sell rows: 0
+- Bad tick rows: 6
+
+Overall summary
+- Number of signals: 19636.0
+- Fill rate: 0.847219
+- Average improvement: 0.006534
+- Median improvement: 0.100000
+- Positive improvement rate: 0.700906

@@ -3,3 +3,7 @@ data/
 __pycache__/
 *.pyc
 venv/
+backtest_outputs/*.csv
+backtest_outputs/**/*.csv
+backtest_outputs/*.png
+backtest_outputs/*.txt

@@ -36,7 +36,12 @@ jupyter notebook cleaning_nasdaq.ipynb
 ### 4. Run the backtests
 ```bash
 python backtest_gold.py
-python run_all_backtests.py
+python backtest_eurostoxx.py
+python backtest_gbp.py
+python backtest_bunds.py
+python backtest_heatingoil.py
+python backtest_jpy.py
+python backtest_nasdaq.py
 ```
 
 ### 5. Launch the dashboard

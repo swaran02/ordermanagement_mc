@@ -584,14 +584,14 @@ elif page == "Backtest Results":
 
     # Load all results
     backtest_configs = {
-        "Gold":         {"dir": "backtest_outputs",    "prefix": "GC"},
-        "EuroStoxx":    {"dir": "backtest_outputs/ES", "prefix": "ES"},
-        "GBP":          {"dir": "backtest_outputs/GBP","prefix": "GBP"},
-        "German Bunds": {"dir": "backtest_outputs/Bunds","prefix": "Bunds"},
-        "Heating Oil":  {"dir": "backtest_outputs/HO", "prefix": "HO"},
-        "JPY":          {"dir": "backtest_outputs/JPY","prefix": "JPY"},
-        "Nasdaq":       {"dir": "backtest_outputs/NQ", "prefix": "NQ"},
-    }
+    "Gold":         {"dir": "backtest_outputs",    "prefix": "GC"},
+    "EuroStoxx":    {"dir": "data/EuroStoxx/backtest_outputs", "prefix": "EuroStoxx"},
+    "GBP":          {"dir": "data/GBP - British Pound/backtest_outputs", "prefix": "GBP"},
+    "German Bunds": {"dir": "data/German Bunds - German Government Bonds/backtest_outputs", "prefix": "Bunds"},
+    "Heating Oil":  {"dir": "data/HeatingOil/backtest_outputs", "prefix": "HeatingOil"},
+    "JPY":          {"dir": "data/JPY - Japanese Yen/backtest_outputs", "prefix": "JPY"},
+    "Nasdaq":       {"dir": "data/Nasdaq/backtest_outputs", "prefix": "Nasdaq"},
+}
 
     # Cross market summary
     st.subheader("Cross-Market Summary")

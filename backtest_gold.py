@@ -1,25 +1,21 @@
 """
-Gold backtest script designed to work with the existing cleaning/recommendation workflow
-WITHOUT changing the cleaning file from your partner.
+Gold recommendation backtest.
 
-Expected inputs in the same folder (unless paths are changed below):
+Expected inputs:
 - GC_signals_with_recommendations.csv
 - GC_clean.csv
 
 What this script does:
-1. loads the recommendation file and stitched 1-minute market file
-2. resamples GC_clean.csv to 5-minute OHLCV bars internally
-3. runs sanity checks
-4. merges recommendations with realized 5-minute market OHLCV
-5. applies fill logic
-6. computes execution price and improvement vs market-open benchmark
-7. writes detailed and summary outputs
+1. loads the recommendation file and stitched market file
+2. resamples the market data to the signal horizon
+3. applies the fill rules to each recommendation
+4. compares execution against the open-price benchmark
+5. writes detailed backtest results, summaries, and charts
 
 How to use:
-- Put this file in the same folder as:
-    GC_clean.csv
-    GC_signals_with_recommendations.csv
-- Run it after the cleaning/statistical notebook has already produced those files.
+- run the gold cleaning notebook first so it creates the recommendation and clean market files
+- keep this script in the project folder structure used by the cleaning workflow
+- run the script and review the files written to backtest_outputs
 """
 
 from __future__ import annotations
@@ -33,13 +29,8 @@ import matplotlib.pyplot as plt
 # Configuration
 # ----------------------------
 BASE_DIR = Path(".")
-DATA_DIR = BASE_DIR / "data" / "Gold"
-
-SIGNALS_FILE = DATA_DIR / "GC_signals_with_recommendations.csv"
-MARKET_FILE = DATA_DIR / "GC_clean.csv"
-
-OUTPUT_DIR = BASE_DIR / "backtest_outputs"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+SIGNALS_FILE = BASE_DIR / "GC_signals_with_recommendations.csv"
+MARKET_FILE = BASE_DIR / "GC_clean.csv"
 
 TICK_SIZE = 0.10  # Gold tick size
 RESAMPLE_FREQ = "5min"
@@ -99,12 +90,23 @@ def resample_market_to_5min(market: pd.DataFrame) -> pd.DataFrame:
     return df_5min
 
 
-def load_inputs(signals_file: Path, market_file: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def load_inputs(signals_file: Path, market_file: Path) -> tuple[pd.DataFrame, pd.DataFrame, Path]:
     """Load recommendation file and stitched 1-minute market file, then resample market to 5-minute."""
+
+    # if the files are not in the running folder, try the data/Gold folder from the cleaning workflow
     if not signals_file.exists():
-        raise FileNotFoundError(f"Signals file not found: {signals_file.resolve()}")
+        alt_signals = BASE_DIR / "data" / "Gold" / signals_file.name
+        if alt_signals.exists():
+            signals_file = alt_signals
+        else:
+            raise FileNotFoundError(f"Signals file not found: {signals_file.resolve()}")
+
     if not market_file.exists():
-        raise FileNotFoundError(f"Market file not found: {market_file.resolve()}")
+        alt_market = BASE_DIR / "data" / "Gold" / market_file.name
+        if alt_market.exists():
+            market_file = alt_market
+        else:
+            raise FileNotFoundError(f"Market file not found: {market_file.resolve()}")
 
     signals = pd.read_csv(signals_file)
     market_1m = pd.read_csv(market_file)
@@ -115,7 +117,14 @@ def load_inputs(signals_file: Path, market_file: Path) -> tuple[pd.DataFrame, pd
         signals = signals.rename(columns={sig_dt: "datetime"})
 
     market_5m = resample_market_to_5min(market_1m)
-    return signals, market_5m
+    return signals, market_5m, signals_file
+
+def choose_output_dir(signals_file: Path) -> Path:
+    """Create the output folder next to the signals file actually used."""
+    output_dir = signals_file.parent / "backtest_outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
 
 
 def sanity_checks(signals: pd.DataFrame, tick_size: float) -> dict[str, pd.DataFrame]:
@@ -161,7 +170,7 @@ def merge_signals_with_market(signals: pd.DataFrame, market_5m: pd.DataFrame) ->
     return merged
 
 
-def run_backtest(merged: pd.DataFrame, tick_size: float = TICK_SIZE) -> pd.DataFrame:
+def run_backtest(merged: pd.DataFrame) -> pd.DataFrame:
     """
     Backtest logic:
     - buy fills if low <= limit_price
@@ -201,7 +210,6 @@ def run_backtest(merged: pd.DataFrame, tick_size: float = TICK_SIZE) -> pd.DataF
     )
 
     merged["better_than_market"] = (merged["improvement"] > 0).astype(int)
-    merged["improvement_ticks"] = merged["improvement"] / tick_size
     return merged
 
 
@@ -253,6 +261,16 @@ def build_summaries(merged: pd.DataFrame) -> dict[str, pd.DataFrame]:
                 median_improvement=("improvement", "median"),
             ).reset_index()
 
+    # keep the label-based state summaries too if those columns exist in the recommendation file
+    for label_col in ["vol_state_label", "range_state_label", "trend_state_label"]:
+        if label_col in merged.columns:
+            state_tables[label_col] = merged.groupby(label_col).agg(
+                num_signals=("datetime", "count"),
+                fill_rate=("filled", "mean"),
+                avg_improvement=("improvement", "mean"),
+                median_improvement=("improvement", "median"),
+            ).reset_index()
+
     merged = merged.copy()
     merged["fill_prob_bucket"] = pd.cut(
         merged[fill_prob_col],
@@ -275,21 +293,21 @@ def build_summaries(merged: pd.DataFrame) -> dict[str, pd.DataFrame]:
     }
 
 
-def save_tables(checks: dict[str, pd.DataFrame], market_5m: pd.DataFrame, merged: pd.DataFrame, summaries: dict[str, pd.DataFrame]) -> None:
+def save_tables(output_dir: Path, checks: dict[str, pd.DataFrame], market_5m: pd.DataFrame, merged: pd.DataFrame, summaries: dict[str, pd.DataFrame]) -> None:
     """Write detailed outputs and summaries."""
-    checks["missing_summary"].to_csv(OUTPUT_DIR / "GC_recommendation_missing_summary.csv")
-    checks["bad_buys"].to_csv(OUTPUT_DIR / "GC_bad_buys.csv", index=False)
-    checks["bad_sells"].to_csv(OUTPUT_DIR / "GC_bad_sells.csv", index=False)
-    checks["bad_tick_rows"].to_csv(OUTPUT_DIR / "GC_bad_tick_rows.csv", index=False)
+    checks["missing_summary"].to_csv(output_dir / "GC_recommendation_missing_summary.csv")
+    checks["bad_buys"].to_csv(output_dir / "GC_bad_buys.csv", index=False)
+    checks["bad_sells"].to_csv(output_dir / "GC_bad_sells.csv", index=False)
+    checks["bad_tick_rows"].to_csv(output_dir / "GC_bad_tick_rows.csv", index=False)
 
-    market_5m.to_csv(OUTPUT_DIR / "GC_5min_from_GC_clean.csv", index=False)
-    merged.to_csv(OUTPUT_DIR / "GC_backtest_results.csv", index=False)
+    market_5m.to_csv(output_dir / "GC_5min_from_GC_clean.csv", index=False)
+    merged.to_csv(output_dir / "GC_backtest_results.csv", index=False)
 
     for name, df in summaries.items():
-        df.to_csv(OUTPUT_DIR / f"{name}.csv", index=False)
+        df.to_csv(output_dir / f"{name}.csv", index=False)
 
 
-def make_charts(summaries: dict[str, pd.DataFrame]) -> None:
+def make_charts(output_dir: Path, summaries: dict[str, pd.DataFrame]) -> None:
     """Create a few simple charts."""
     if "by_direction" in summaries and not summaries["by_direction"].empty:
         df = summaries["by_direction"]
@@ -300,7 +318,7 @@ def make_charts(summaries: dict[str, pd.DataFrame]) -> None:
         plt.xlabel("Signal Direction")
         plt.ylabel("Average Improvement")
         plt.tight_layout()
-        plt.savefig(OUTPUT_DIR / "GC_avg_improvement_by_direction.png", dpi=200)
+        plt.savefig(output_dir / "GC_avg_improvement_by_direction.png", dpi=200)
         plt.close()
 
     if "calibration" in summaries and not summaries["calibration"].empty:
@@ -313,7 +331,7 @@ def make_charts(summaries: dict[str, pd.DataFrame]) -> None:
             plt.xlabel("Estimated Fill Probability")
             plt.ylabel("Actual Fill Rate")
             plt.tight_layout()
-            plt.savefig(OUTPUT_DIR / "GC_fill_probability_calibration.png", dpi=200)
+            plt.savefig(output_dir / "GC_fill_probability_calibration.png", dpi=200)
             plt.close()
 
     if "by_ticks" in summaries and not summaries["by_ticks"].empty:
@@ -325,11 +343,11 @@ def make_charts(summaries: dict[str, pd.DataFrame]) -> None:
         plt.xlabel("Ticks Away")
         plt.ylabel("Fill Rate")
         plt.tight_layout()
-        plt.savefig(OUTPUT_DIR / "GC_fill_rate_by_ticks.png", dpi=200)
+        plt.savefig(output_dir / "GC_fill_rate_by_ticks.png", dpi=200)
         plt.close()
 
 
-def write_run_report(checks: dict[str, pd.DataFrame], summaries: dict[str, pd.DataFrame]) -> None:
+def write_run_report(output_dir: Path, checks: dict[str, pd.DataFrame], summaries: dict[str, pd.DataFrame]) -> None:
     """Write a short text summary of the run."""
     lines = []
     lines.append("Gold Backtest Run Report")
@@ -352,12 +370,14 @@ def write_run_report(checks: dict[str, pd.DataFrame], summaries: dict[str, pd.Da
         lines.append(f"- Median improvement: {metric_map.get('median_improvement'):.6f}")
         lines.append(f"- Positive improvement rate: {metric_map.get('positive_improvement_rate'):.6f}")
 
-    (OUTPUT_DIR / "GC_backtest_run_report.txt").write_text("\n".join(lines), encoding="utf-8")
+    (output_dir / "GC_backtest_run_report.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> int:
     print("Loading inputs...")
-    signals, market_5m = load_inputs(SIGNALS_FILE, MARKET_FILE)
+    signals, market_5m, signals_file = load_inputs(SIGNALS_FILE, MARKET_FILE)
+
+    output_dir = choose_output_dir(signals_file)
 
     print("Running sanity checks...")
     checks = sanity_checks(signals, TICK_SIZE)
@@ -372,15 +392,15 @@ def main() -> int:
     summaries = build_summaries(merged)
 
     print("Saving tables...")
-    save_tables(checks, market_5m, merged, summaries)
+    save_tables(output_dir, checks, market_5m, merged, summaries)
 
     print("Making charts...")
-    make_charts(summaries)
+    make_charts(output_dir, summaries)
 
     print("Writing run report...")
-    write_run_report(checks, summaries)
+    write_run_report(output_dir, checks, summaries)
 
-    print(f"Done. Outputs written to: {OUTPUT_DIR.resolve()}")
+    print(f"Done. Outputs written to: {output_dir.resolve()}")
     return 0
 
 
